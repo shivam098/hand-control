@@ -1,0 +1,32 @@
+MAC
+Requires macOS 13 or later and Xcode or Swift command line tools.
+From the source folder:
+  swift test
+  bash Packaging/build-mac.sh
+The bundle is signed locally and written to ~/Downloads/Hand Control.
+The build targets the architecture of the build machine.
+By default the signature is ad hoc: macOS can require a new Accessibility
+grant after each build. To use a persistent local developer identity, list
+your valid signers with `security find-identity -v -p codesigning`, then set
+`git config --local handcontrol.signingIdentity <certificate-fingerprint>`
+in this checkout. Only use a code-signing identity you are authorized to use.
+Keep the same bundle identifier, signing identity, and installation path for
+updates. The first transition from ad hoc requires a new user grant.
+HAND_CONTROL_SIGN_IDENTITY overrides the local setting; set it to `-` for
+an explicitly ad-hoc build. A local Apple Development certificate is not a
+Developer ID/notarization credential for public distribution.
+To replay a local clip containing a visible hand in the Mac tracker, set
+HAND_CONTROL_TEST_VIDEO to its full path when running swift test.
+
+WINDOWS X64
+From a machine with Python 3 and Zig 0.13.0 on PATH:
+  python3 Windows/build.py
+Alternatively install ziglang==0.13.0 into a Python virtual environment and
+invoke the script using that environment's Python. The script downloads the
+pinned official headers, runtime and model into .build, verifies their hashes,
+and cross-compiles the portable EXE. An optional first argument specifies
+the output directory. Neither Python nor Zig is needed on the target PC.
+
+Sources/GestureCore is the shared gesture and calibration engine.
+The Mac frontend uses AVFoundation, Vision, AppKit and Quartz. Windows uses
+Media Foundation, MediaPipe Tasks, GDI and SendInput. Both process locally.

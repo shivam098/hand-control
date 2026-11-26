@@ -1,0 +1,9 @@
+LIBRARY libmediapipe.dll
+EXPORTS
+    MpHandLandmarkerCreate
+    MpHandLandmarkerDetectForVideo
+    MpHandLandmarkerCloseResult
+    MpHandLandmarkerClose
+    MpImageCreateFromUint8Data
+    MpImageFree
+    MpErrorFree

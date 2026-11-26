@@ -1,0 +1,54 @@
+HAND CONTROL
+
+Mac: open Hand Control.app. Click Start Camera and allow Camera access.
+Click Allow Accessibility, then enable Hand Control in System Settings >
+Privacy & Security > Accessibility. If it is not listed, add the app with +.
+If macOS asks you to reopen it, quit and reopen the same copy. You can
+preview and calibrate without Accessibility, but the pointer will not move.
+If you intend to move the app into Applications, do that before granting access.
+If the switch is on but the app says "Preview only", click Show This App.
+In Accessibility remove just the old Hand Control entry, click +, and select
+that exact app from Finder. Turn it on and return to Hand Control. Reopen
+it if macOS asks. No Input Monitoring or Full Disk Access is needed.
+
+Windows 10/11 x64: extract the entire Windows ZIP, then double-click
+Hand Control.exe inside the extracted folder. Keep the .dll and .task
+files beside the EXE. No Python, download, account, or administrator access
+is needed to run it. Click Start Camera. If access is blocked, click Camera
+Settings and allow camera access for desktop apps. The Windows build is not
+publisher-signed; check your device's software policies before running it.
+Windows N editions need Microsoft's Media Feature Pack for webcam capture.
+
+YOUR FIRST MINUTE
+1. Face the webcam in good light. Show one hand, palm toward the camera,
+   with all fingertips in view. The camera image is mirrored like a mirror.
+2. Click Calibrate Reach. Point with your index finger at the upper-left
+   extent of YOUR comfortable reach in the preview; hold until the prompt
+   changes. Then hold at the lower right. These two positions map to the
+   corners of the primary screen. You need not reach the camera image edges.
+   The dashed rectangle shows the current mapping. Calibration is saved.
+3. Open and separate your fingertips once to arm control. Start by pointing
+   at something harmless like the title bar of an empty window.
+
+GESTURES
+Move         Point with your index finger and move your hand.
+Click        Briefly touch thumb to index fingertip and release.
+Double-click Make two quick, distinct index pinches over the same target.
+Drag/drop    Hold the index pinch until "Dragging" appears, move, then release.
+Right-click  Touch thumb to middle fingertip, then release.
+Scroll       Extend only index and middle fingers; fold ring and little
+             fingers, keep the thumb clear, then move both fingers up/down.
+Pause        Make a closed fist. Open your hand with fingertips apart to resume.
+
+Minimize the window to control other apps. Closing it or clicking Stop Camera
+stops capture and releases a held drag. Losing sight of the hand also releases
+a drag; a pinch already held when tracking returns cannot start a click.
+The camera feed stays on the device. It is not recorded or uploaded.
+
+Pointer smoothing is automatic: small hand movements are damped more than
+large sweeps, including while dragging. The built-in FaceTime HD camera uses
+visible light, not an infrared feed. For more reliable detection, light your
+hand from the front and keep the fingertips visible. If motion still feels
+jumpy, recalibrate a wider reach. For missed clicks, separate the fingertips
+between pinches. Control maps to the primary display. Windows does not
+inject mouse events into protected or higher-privilege desktops.
