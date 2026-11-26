@@ -6,10 +6,17 @@ Privacy & Security > Accessibility. If it is not listed, add the app with +.
 If macOS asks you to reopen it, quit and reopen the same copy. You can
 preview and calibrate without Accessibility, but the pointer will not move.
 If you intend to move the app into Applications, do that before granting access.
-If the switch is on but the app says "Preview only", click Show This App.
-In Accessibility remove just the old Hand Control entry, click +, and select
-that exact app from Finder. Turn it on and return to Hand Control. Reopen
-it if macOS asks. No Input Monitoring or Full Disk Access is needed.
+If the switch is on but the app says "Preview only", first quit and reopen
+the same copy, even if macOS did not ask. Look for "Desktop control enabled".
+If it stays blocked after a rebuild, click Show This App. In Accessibility
+remove just the old Hand Control entry, click +, and select that exact app
+from Finder. Enable it and reopen Hand Control.
+If the signing entry is still stale, quit the app and, only if you want to
+clear this app's Accessibility approval, run:
+  tccutil reset Accessibility local.handcontrol.desktop
+Open the same app, click Allow Accessibility, approve its fresh request,
+then quit and reopen it. This reset does not grant access. No Input
+Monitoring or Full Disk Access is needed.
 
 Windows 10/11 x64: extract the entire Windows ZIP, then double-click
 Hand Control.exe inside the extracted folder. Keep the .dll and .task

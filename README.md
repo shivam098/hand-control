@@ -21,7 +21,7 @@ Select **Calibrate Reach**. Hold your index fingertip at the comfortable upper-l
 | Scroll | Extend only index and middle fingers and move vertically. |
 | Pause / resume | Make a fist; open your hand and separate your fingertips to resume. |
 
-If macOS shows **Preview only** despite an enabled Accessibility entry, use **Show This App** and re-add that exact bundle. Ad-hoc rebuilds can invalidate an earlier grant. See [getting started](Getting%20Started.txt) for recovery and [build instructions](Build.txt) for persistent local signing.
+If macOS shows **Preview only** despite an enabled Accessibility entry, first quit and reopen the same app. The expected status is **Desktop control enabled**. Ad-hoc rebuilds can invalidate an earlier grant even if the switch is still on. See [getting started](Getting%20Started.txt) for the app-specific recovery steps and [build instructions](Build.txt) for persistent local signing.
 
 ## Development
 
