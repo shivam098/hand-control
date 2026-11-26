@@ -3,6 +3,12 @@
 Control the primary display of a Mac or Windows PC with one hand and a webcam.
 The camera preview and hand tracking run locally. No account or video upload is required.
 
+## Demo
+
+[![A short preview of hands-free control on a Mac, showing the hand and a Finder window.](docs/media/hand-control-demo.gif)](https://github.com/shivam098/hand-control/releases/download/v1.2/Hand-Control-demo.mp4)
+
+[Download the full 26-second demo with sound (MP4)](https://github.com/shivam098/hand-control/releases/download/v1.2/Hand-Control-demo.mp4). Desktop text is obscured for privacy.
+
 ## Get started
 
 Download a build from [Releases](https://github.com/shivam098/hand-control/releases).
