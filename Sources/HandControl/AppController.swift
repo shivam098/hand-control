@@ -86,11 +86,17 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
         calibrate.isEnabled = false
         cameraSettings.isHidden = true
-        let buttons = NSStackView(views: [start, calibrate, allow, reveal, cameraSettings])
-        buttons.spacing = 8
+        start.image = NSImage(systemSymbolName: "video", accessibilityDescription: nil)
+        start.imagePosition = .imageLeading
+        start.bezelColor = .controlAccentColor
+        let buttons = CommandBar(buttons: [start, calibrate, allow, reveal, cameraSettings])
+        preview.wantsLayer = true
+        preview.layer?.cornerRadius = 14
+        preview.layer?.cornerCurve = .continuous
+        preview.layer?.masksToBounds = true
         let root = NSView()
         window.contentView = root
-        let stack = NSStackView(views: [title, subtitle, preview, status, guide, buttons, permission])
+        let stack = NSStackView(views: [title, subtitle, preview, status, buttons, guide, permission])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
@@ -106,6 +112,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
             preview.widthAnchor.constraint(equalTo: stack.widthAnchor),
             preview.heightAnchor.constraint(greaterThanOrEqualToConstant: 160),
+            buttons.widthAnchor.constraint(lessThanOrEqualTo: stack.widthAnchor),
             guide.widthAnchor.constraint(equalTo: stack.widthAnchor),
             status.widthAnchor.constraint(equalTo: stack.widthAnchor),
             permission.widthAnchor.constraint(equalTo: stack.widthAnchor)

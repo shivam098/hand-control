@@ -1,0 +1,3 @@
+#include "resource.h"
+IDI_HAND_CONTROL ICON "../Packaging/Icons/HandControl.ico"
+1 24 "HandControl.manifest"

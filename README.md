@@ -1,7 +1,11 @@
+<img src="Packaging/Icons/HandControl.svg" width="64" height="64" align="right" alt="">
+
 # Hand Control
 
 Control the primary display of a Mac or Windows PC with one hand and a webcam.
 The camera preview and hand tracking run locally. No account or video upload is required.
+
+The controls use Liquid Glass on macOS 26 and later, an AppKit material on earlier Macs, and Mica on supported Windows 11 builds. The camera feed stays sharp. High contrast and reduced-transparency settings take priority over the effect.
 
 ## Demo
 
@@ -34,3 +38,4 @@ If macOS shows **Preview only** despite an enabled Accessibility entry, first qu
 `Sources/GestureCore` is shared by the Swift/AppKit Mac frontend and the C++ Windows frontend. The Mac uses AVFoundation and Vision; Windows uses Media Foundation and MediaPipe. Run `swift test` on a Mac. Set `HAND_CONTROL_TEST_VIDEO` to a local hand video to include the optional replay test. Reference footage is not distributed.
 
 Windows runtime and model details are in [third-party notices](Windows/NOTICE.txt).
+The command bar follows the [Apple Design Skill's glass guidance](https://github.com/dickwu/apple-design-skill/blob/0ee7d11f3dcd0225f56d6136799094b2d51f7a30/references/hig/liquid-glass.md).

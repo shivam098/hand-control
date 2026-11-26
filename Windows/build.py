@@ -68,9 +68,9 @@ def main():
     exe = BUILD / "Hand Control.exe"
     run("c++", *target, "-std=c++17", "-O2", "-s", "-static", "-Wl,--subsystem,windows", "-municode",
         "-DUNICODE", "-D_UNICODE", "-DNOMINMAX", "-DMP_EXPORT=", "-I", core/"include", "-I", DEPS/"headers",
-        win/"Main.cpp", win/"Camera.cpp", win/"Tracker.cpp", BUILD/"core.o", BUILD/"libmediapipe.a",
+        win/"Main.cpp", win/"Camera.cpp", win/"Tracker.cpp", win/"HandControl.res", BUILD/"core.o", BUILD/"libmediapipe.a",
         "-lmfreadwrite", "-lmf", "-lmfplat", "-lmfuuid", "-lole32", "-luuid", "-luser32", "-lgdi32",
-        "-ladvapi32", "-lshell32", "-o", exe)
+        "-ladvapi32", "-lshell32", "-ldwmapi", "-o", exe)
     output = DEST / "Hand Control - Windows x64.zip"
     folder = "Hand Control/"
     with zipfile.ZipFile(wheel) as upstream, zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:

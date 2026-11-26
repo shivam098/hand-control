@@ -1,0 +1,1 @@
+#define IDI_HAND_CONTROL 101

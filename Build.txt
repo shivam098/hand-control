@@ -1,5 +1,7 @@
 MAC
 Requires macOS 13 or later and Xcode or Swift command line tools.
+Build with Xcode 26 or newer for native Liquid Glass on macOS 26 and later.
+Older SDKs and systems use an AppKit toolbar material instead.
 From the source folder:
   swift test
   bash Packaging/build-mac.sh
@@ -30,3 +32,13 @@ the output directory. Neither Python nor Zig is needed on the target PC.
 Sources/GestureCore is the shared gesture and calibration engine.
 The Mac frontend uses AVFoundation, Vision, AppKit and Quartz. Windows uses
 Media Foundation, MediaPipe Tasks, GDI and SendInput. Both process locally.
+
+ARTWORK
+Normal builds use the checked-in Mac icon and Windows resource file.
+After editing Packaging/Icons/HandControl.svg, run on macOS:
+  python3 Packaging/generate-icons.py
+Then, after changing the icons, Windows manifest or resource definition:
+  cd Windows
+  zig rc /fo HandControl.res HandControl.rc
+An RC-compatible compiler such as llvm-rc can replace "zig rc".
+Commit the regenerated .icns, .ico and .res with their sources.

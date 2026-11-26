@@ -12,10 +12,11 @@ if [[ "$identity" == '-' ]]; then variant=adhoc; fi
 swift build -c release --product HandControl
 bin="$(swift build -c release --show-bin-path)/HandControl"
 bundle=".build/package-mac/$variant/Hand Control.app"
-mkdir -p "$bundle/Contents/MacOS" "$dest"
+mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources" "$dest"
 install -m 755 "$bin" "$bundle/Contents/MacOS/HandControl"
 xcrun strip -S "$bundle/Contents/MacOS/HandControl"
 install -m 644 Packaging/Info.plist "$bundle/Contents/Info.plist"
+install -m 644 Packaging/Icons/HandControl.icns "$bundle/Contents/Resources/HandControl.icns"
 codesign --force --sign "$identity" "$bundle"
 codesign --verify --strict "$bundle"
 ditto --norsrc --noextattr "$bundle" "$dest/Hand Control.app"

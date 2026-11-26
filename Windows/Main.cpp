@@ -1,5 +1,7 @@
 #include "Camera.hpp"
 #include "DesktopMouse.hpp"
+#include "resource.h"
+#include <dwmapi.h>
 #include <shellapi.h>
 #include <algorithm>
 #include <cmath>
@@ -17,6 +19,7 @@ class HandWindow {
     HWND window{}, start{}, calibrate{}, settings{};
     HFONT heading{}, body{}, emphasis{};
     int dpi = 96;
+    bool glassShelf{}, highContrast{};
     bool active{}, saved{}, received{};
     double lastFrame{};
     HCState core{};
@@ -27,6 +30,7 @@ class HandWindow {
     std::wstring status = L"Ready. Start the camera to see your hand.";
     static constexpr wchar_t key[] = L"Software\\HandControl";
     enum { Start = 101, Calibrate, Settings };
+    static constexpr int shelfHeight = 60;
 
     int px(int logical) const { return MulDiv(logical, dpi, 96); }
     HFONT font(int size, int weight) const {
@@ -41,10 +45,25 @@ class HandWindow {
         SendMessageW(handle, WM_SETFONT, reinterpret_cast<WPARAM>(body), TRUE);
         return handle;
     }
+    void updateMaterial() {
+        HIGHCONTRASTW contrast{sizeof(HIGHCONTRASTW)};
+        highContrast = !SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0)
+                    || (contrast.dwFlags & HCF_HIGHCONTRASTON);
+        BOOL reduceEffects = FALSE;
+        bool useBackdrop = !highContrast
+            && SystemParametersInfoW(SPI_GETDISABLEOVERLAPPEDCONTENT, 0, &reduceEffects, 0) && !reduceEffects;
+        auto backdrop = useBackdrop ? DWMSBT_MAINWINDOW : DWMSBT_NONE;
+        glassShelf = SUCCEEDED(DwmSetWindowAttribute(window, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop)))
+                  && useBackdrop;
+        MARGINS margins{0, 0, 0, glassShelf ? px(shelfHeight) : 0};
+        if (FAILED(DwmExtendFrameIntoClientArea(window, &margins))) glassShelf = false;
+        InvalidateRect(window, nullptr, FALSE);
+    }
     void created() {
         HDC dc = GetDC(window);
         dpi = GetDeviceCaps(dc, LOGPIXELSX);
         ReleaseDC(window, dc);
+        updateMaterial();
         heading = font(28, FW_SEMIBOLD); body = font(15, FW_NORMAL); emphasis = font(16, FW_SEMIBOLD);
         start = button(L"Start Camera", Start);
         calibrate = button(L"Calibrate Reach", Calibrate);
@@ -62,7 +81,7 @@ class HandWindow {
     void layout() {
         RECT r{};
         GetClientRect(window, &r);
-        int y = r.bottom - px(46);
+        int y = r.bottom - (px(shelfHeight) + px(32)) / 2;
         MoveWindow(start, px(20), y, px(132), px(32), TRUE);
         MoveWindow(calibrate, px(162), y, px(158), px(32), TRUE);
         MoveWindow(settings, px(330), y, px(150), px(32), TRUE);
@@ -173,9 +192,14 @@ class HandWindow {
         DrawTextW(dc, text, -1, &rect, flags | DT_NOPREFIX);
     }
     void drawFrame(HDC dc, RECT area) {
-        fill(dc, area, RGB(13,20,30));
+        fill(dc, area, !preview && highContrast ? GetSysColor(COLOR_WINDOW) : RGB(13,20,30));
         if (!preview) {
-            label(dc, area, L"Camera preview", emphasis, RGB(165,180,197), DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            int size = px(48), top = (area.top + area.bottom - size - px(30)) / 2;
+            auto icon = reinterpret_cast<HICON>(GetClassLongPtrW(window, GCLP_HICON));
+            DrawIconEx(dc, (area.left + area.right - size) / 2, top, icon, size, size, 0, nullptr, DI_NORMAL);
+            area.top = top + size + px(8);
+            label(dc, area, L"Camera preview", emphasis, highContrast ? GetSysColor(COLOR_WINDOWTEXT) : RGB(165,180,197),
+                  DT_CENTER | DT_SINGLELINE);
             return;
         }
         const auto &f = *preview;
@@ -228,17 +252,24 @@ class HandWindow {
         HBITMAP image = CreateCompatibleBitmap(screen, r.right, r.bottom);
         auto previous = SelectObject(dc, image);
         SetBkMode(dc, TRANSPARENT);
-        fill(dc, r, RGB(245,247,250));
+        auto ink = GetSysColor(COLOR_WINDOWTEXT);
+        auto secondary = highContrast ? ink : RGB(69,85,101);
+        fill(dc, r, highContrast ? GetSysColor(COLOR_WINDOW) : RGB(245,247,250));
+        RECT shelf{0, r.bottom - px(shelfHeight), r.right, r.bottom};
+        // DWM composites the system material through black GDI pixels in the extended frame.
+        fill(dc, shelf, glassShelf ? RGB(0,0,0) : GetSysColor(COLOR_BTNFACE));
+        RECT rule{shelf.left, shelf.top - 1, shelf.right, shelf.top};
+        fill(dc, rule, GetSysColor(COLOR_3DSHADOW));
         auto rect = [&](int top, int bottom) -> RECT { return {px(20), top, r.right - px(20), bottom}; };
-        label(dc, rect(px(12),px(49)), L"Hand Control", heading, RGB(25,39,53), DT_SINGLELINE);
-        label(dc, rect(px(51),px(78)), L"Control your desktop with one hand. Video stays on this PC.", body, RGB(69,85,101), DT_SINGLELINE);
-        drawFrame(dc, rect(px(80),r.bottom-px(179)));
-        label(dc, rect(r.bottom-px(169),r.bottom-px(125)), status.c_str(), emphasis, RGB(24,62,70), DT_WORDBREAK);
-        label(dc, rect(r.bottom-px(123),r.bottom-px(52)),
+        label(dc, rect(px(12),px(49)), L"Hand Control", heading, highContrast ? ink : RGB(25,39,53), DT_SINGLELINE);
+        label(dc, rect(px(51),px(78)), L"Control your desktop with one hand. Video stays on this PC.", body, secondary, DT_SINGLELINE);
+        drawFrame(dc, rect(px(80),r.bottom-px(190)));
+        label(dc, rect(r.bottom-px(180),r.bottom-px(136)), status.c_str(), emphasis, highContrast ? ink : RGB(24,62,70), DT_WORDBREAK);
+        label(dc, rect(r.bottom-px(134),shelf.top-px(5)),
               L"Point to move. Pinch thumb + index to click; pinch twice to double-click, or hold to drag. "
               L"Pinch thumb + middle to right-click. Raise only index + middle and move vertically to scroll. "
               L"Make a fist to pause; open your hand to resume.",
-              body, RGB(45,58,70), DT_WORDBREAK);
+              body, secondary, DT_WORDBREAK);
         BitBlt(screen, 0, 0, r.right, r.bottom, dc, 0, 0, SRCCOPY);
         SelectObject(dc, previous); DeleteObject(image); DeleteDC(dc);
         EndPaint(window, &ps);
@@ -259,6 +290,8 @@ public:
             case WM_CREATE: self->created(); return 0;
             case WM_COMMAND: self->command(LOWORD(w)); return 0;
             case WM_TIMER: self->tick(); return 0;
+            case WM_SETTINGCHANGE: case WM_THEMECHANGED: case WM_SYSCOLORCHANGE: case WM_DWMCOMPOSITIONCHANGED:
+                self->updateMaterial(); break;
             case WM_SIZE: self->layout(); InvalidateRect(wnd, nullptr, FALSE); return 0;
             case WM_GETMINMAXINFO: {
                 auto *limits = reinterpret_cast<MINMAXINFO *>(l);
@@ -292,10 +325,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
         return 1;
     }
     HandWindow app(std::filesystem::path(path).parent_path() / L"hand_landmarker.task");
-    WNDCLASSW cls{};
+    WNDCLASSEXW cls{};
+    cls.cbSize = sizeof(cls);
     cls.lpfnWndProc = HandWindow::proc; cls.hInstance = instance; cls.lpszClassName = L"HandControl.Main";
-    cls.hCursor = LoadCursorW(nullptr, IDC_ARROW); cls.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
-    if (!RegisterClassW(&cls)) return 1;
+    cls.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    auto icon = MAKEINTRESOURCEW(IDI_HAND_CONTROL);
+    cls.hIcon = LoadIconW(instance, icon);
+    cls.hIconSm = static_cast<HICON>(LoadImageW(instance, icon, IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+                                               GetSystemMetrics(SM_CYSMICON), LR_SHARED));
+    if (!RegisterClassExW(&cls)) return 1;
     auto window = CreateWindowExW(0, cls.lpszClassName, L"Hand Control", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                                   CW_USEDEFAULT, CW_USEDEFAULT, 860, 710, nullptr, nullptr, instance, &app);
     if (!window) return 1;

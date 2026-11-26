@@ -2,6 +2,7 @@ import AppKit
 import GestureCore
 
 final class Preview: NSView {
+    private let idleIcon = NSImage(named: NSImage.applicationIconName)
     var frameImage: CameraFrame?
     var reach = hc_default_range()
     var firstCorner: HCPoint?
@@ -16,7 +17,10 @@ final class Preview: NSView {
             let style: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 17, weight: .medium),
                                                        .foregroundColor: NSColor(white: 0.75, alpha: 1)]
             let size = text.size(withAttributes: style)
-            text.draw(at: CGPoint(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2), withAttributes: style)
+            let top = bounds.midY - (size.height + 56) / 2
+            idleIcon?.draw(in: CGRect(x: bounds.midX - 24, y: top, width: 48, height: 48), from: .zero,
+                           operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+            text.draw(at: CGPoint(x: bounds.midX - size.width / 2, y: top + 56), withAttributes: style)
             return
         }
         let w = CGFloat(sample.image.width), h = CGFloat(sample.image.height)
