@@ -41,7 +41,8 @@ GESTURES
 Move         Point with your index finger and move your hand.
 Click        Briefly touch thumb to index fingertip and release.
 Double-click Make two quick, distinct index pinches over the same target.
-Drag/drop    Hold the index pinch until "Dragging" appears, move, then release.
+Drag/drop    Hold the index pinch until "Dragging" appears, move your whole
+             hand, then open the pinch to drop. The palm guides the drag.
 Right-click  Touch thumb to middle fingertip, then release.
 Scroll       Extend only index and middle fingers; fold ring and little
              fingers, keep the thumb clear, then move both fingers up/down.
@@ -52,9 +53,12 @@ stops capture and releases a held drag. Losing sight of the hand also releases
 a drag; a pinch already held when tracking returns cannot start a click.
 The camera feed stays on the device. It is not recorded or uploaded.
 
-Pointer smoothing is automatic: small hand movements are damped more than
-large sweeps, including while dragging. The built-in FaceTime HD camera uses
-visible light, not an infrared feed. For more reliable detection, light your
+Pointer smoothing is automatic. Aiming stays steady against brief fingertip
+jitter, while sustained small adjustments and quick hand sweeps still move.
+Aim first, then pinch; the app holds the target briefly as the fingers close
+and checks multiple observations before clicking or dropping. The built-in
+FaceTime HD camera uses visible light, not an infrared feed. For more
+reliable detection, light your
 hand from the front and keep the fingertips visible. If motion still feels
 jumpy, recalibrate a wider reach. For missed clicks, separate the fingertips
 between pinches. Control maps to the primary display. Windows does not

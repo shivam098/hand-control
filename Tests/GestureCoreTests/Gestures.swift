@@ -17,6 +17,12 @@ final class GestureTests: XCTestCase {
     @discardableResult func frame(_ points: [HCPoint], _ time: Double) -> HCOutput {
         hc_frame(&s, points, 1, time)
     }
+    @discardableResult func hold(_ pose: [HCPoint], from start: Double, duration: Double = 0.34) -> HCOutput {
+        var result = frame(pose, start)
+        let steps = Int(ceil(duration * 30))
+        for i in 1...steps { result = frame(pose, start + duration * Double(i) / Double(steps)) }
+        return result
+    }
 
     func testRestingPointerRejectsTremorAndStillSettlesOnSmallTargets() {
         let screenWidth = 1600.0
@@ -51,8 +57,7 @@ final class GestureTests: XCTestCase {
                 hc_init(&s, HCRange(left: 0, top: 0, right: 1, bottom: 1), 0.5)
                 frame(open, 0)
                 let pose = dragging ? pinch : open
-                frame(pose, 0.04)
-                let start = frame(pose, 0.38)
+                let start = hold(pose, from: 0.04)
                 XCTAssertEqual(start.action, dragging ? HC_DOWN : HC_POINTER)
                 var previous = start.position.x
                 var lag = 0.0
@@ -74,36 +79,147 @@ final class GestureTests: XCTestCase {
         }
     }
 
+    func testRestingAimIgnoresTremorAndAnIsolatedFingertipJump() {
+        hc_init(&s, HCRange(left: 0, top: 0, right: 1, bottom: 1), 0.5)
+        let origin = frame(open, 0).position
+        var worst = 0.0
+        for i in 1...120 {
+            let t = Double(i) / 30
+            let dx = 0.0025 * sin(2 * .pi * 9 * t)
+            var pose = open.map { HCPoint(x: $0.x + dx, y: $0.y) }
+            if i.isMultiple(of: 19) { pose[8].x += 0.045 }
+            let out = frame(pose, t)
+            XCTAssertEqual(out.action, HC_POINTER)
+            worst = max(worst, abs(out.position.x - origin.x) * 1600)
+        }
+        XCTAssertLessThan(worst, 1, "Peak resting excursion on the noisy trace, in pixels")
+        var aimed = open
+        aimed[8].x += 0.04
+        for i in 1...6 { frame(aimed, 4 + Double(i)/30) }
+        XCTAssertGreaterThan(s.cursor.x, origin.x + 0.03, "A sustained finger-only adjustment must still move")
+    }
+
+    func testPinchApproachKeepsTargetAndSingleNoisySamplesCannotClick() {
+        let aim = frame(open, 0).position
+        for (i,tip) in [8,12].enumerated() {
+            var glitch = open; glitch[4] = glitch[tip]
+            let t = 0.1 + Double(i) * 0.15
+            frame(glitch, t)
+            let actions = [frame(open, t + 0.05).action, frame(open, t + 0.09).action]
+            XCTAssertFalse(actions.contains(HC_CLICK) || actions.contains(HC_RIGHT_CLICK))
+        }
+        var approach = open
+        approach[8].x += 0.035
+        approach[4] = HCPoint(x: approach[8].x - 0.125, y: approach[8].y)
+        let closing = frame(approach, 0.39)
+        XCTAssertEqual(closing.position.x, aim.x, accuracy: 1e-8)
+        var closed = approach; closed[4] = closed[8]
+        frame(closed, 0.42); frame(closed, 0.46)
+        XCTAssertEqual(frame(open, 0.50).action, HC_NO_EVENT)
+        frame(closed, 0.53)
+        XCTAssertEqual(frame(open, 0.56).action, HC_NO_EVENT)
+        let click = frame(open, 0.60)
+        XCTAssertEqual(click.action, HC_CLICK)
+        XCTAssertEqual(click.position.x, aim.x, accuracy: 1e-8)
+        XCTAssertEqual(click.clickCount, 1)
+    }
+
+    func testDragUsesPalmTravelAndDoesNotDropOnOneBadObservation() {
+        let aim = frame(open, 0).position
+        var closed = pinch
+        closed[8].y += 0.065; closed[4] = closed[8]
+        XCTAssertEqual(hold(closed, from: 0.04, duration: 0.33).action, HC_DOWN)
+        closed[8].x += 0.04; closed[4] = closed[8]
+        let curl = frame(closed, 0.41)
+        XCTAssertEqual(curl.action, HC_DRAGGED)
+        XCTAssertEqual(curl.position.x, aim.x, accuracy: 1e-8)
+        XCTAssertEqual(curl.position.y, aim.y, accuracy: 1e-8)
+        var moved = closed.map { HCPoint(x: $0.x + 0.10, y: $0.y) }
+        moved[20] = HCPoint(x: -1, y: -1) // Unrelated fingertip is occluded.
+        let travel = frame(moved, 0.45)
+        XCTAssertEqual(travel.action, HC_DRAGGED)
+        XCTAssertGreaterThan(travel.position.x, aim.x + 0.05)
+        var split = moved; split[4].x -= 0.22
+        XCTAssertEqual(frame(split, 0.49).action, HC_NO_EVENT)
+        XCTAssertEqual(frame(moved, 0.52).action, HC_DRAGGED)
+        XCTAssertEqual(frame(split, 0.56).action, HC_NO_EVENT)
+        XCTAssertEqual(frame(split, 0.60).action, HC_UP)
+        XCTAssertEqual(hc_stop(&s).action, HC_NO_EVENT)
+    }
+
+    func testAmbiguousFistDoesNotDropUntilConfirmedButLossReleasesImmediately() {
+        frame(open, 0); XCTAssertEqual(hold(pinch, from: 0.03).action, HC_DOWN)
+        var curled = pinch; curled[8].y = 0.67; curled[4] = curled[8]
+        XCTAssertEqual(frame(curled, 0.41).action, HC_NO_EVENT)
+        XCTAssertEqual(frame(pinch, 0.44).action, HC_DRAGGED)
+        frame(curled, 0.48)
+        let pause = frame(curled, 0.52)
+        XCTAssertEqual(pause.action, HC_UP)
+        XCTAssertEqual(pause.mode, HC_PAUSE)
+        frame(open, 0.55); XCTAssertEqual(hold(pinch, from: 0.59).action, HC_DOWN)
+        frame(open, 0.96)
+        var missing = pinch; missing[4] = HCPoint(x: -1, y: -1)
+        XCTAssertEqual(frame(missing, 0.98).action, HC_UP)
+        XCTAssertEqual(hc_lost(&s).action, HC_NO_EVENT)
+    }
+
+    func testSparseObservationsCannotArmADragOrConfirmADrop() {
+        frame(open, 0); frame(pinch, 0.04)
+        XCTAssertEqual(frame(pinch, 0.38).action, HC_NO_EVENT)
+        frame(pinch, 0.42); frame(pinch, 0.54); frame(pinch, 0.65)
+        XCTAssertEqual(frame(pinch, 0.72).action, HC_DOWN)
+        frame(open, 0.76)
+        XCTAssertEqual(frame(open, 0.95).action, HC_NO_EVENT)
+        XCTAssertEqual(frame(open, 0.99).action, HC_UP)
+    }
+
     func testPinchReleasesAtAnchorAndSecondTapIsDoubleClick() {
         let move = frame(open, 0)
         XCTAssertEqual(move.action, HC_POINTER)
         XCTAssertEqual(frame(pinch, 0.04).action, HC_NO_EVENT)
-        let first = frame(open, 0.12)
+        frame(pinch, 0.07)
+        XCTAssertEqual(frame(open, 0.12).action, HC_NO_EVENT)
+        let first = frame(open, 0.15)
         XCTAssertEqual(first.action, HC_CLICK)
         XCTAssertEqual(first.position.x, move.position.x)
         XCTAssertEqual(first.clickCount, 1)
-        frame(pinch, 0.2)
-        let second = frame(open, 0.28)
+        frame(pinch, 0.20); frame(pinch, 0.23); frame(open, 0.28)
+        let second = frame(open, 0.31)
         XCTAssertEqual(second.action, HC_CLICK)
         XCTAssertEqual(second.clickCount, 2)
     }
 
+    func testTwoNearbyTargetsAreNotMergedIntoADoubleClick() {
+        hc_init(&s, HCRange(left: 0, top: 0, right: 1, bottom: 1), 0.5)
+        frame(open, 0); frame(pinch, 0.03); frame(pinch, 0.06); frame(open, 0.09)
+        let first = frame(open, 0.12)
+        XCTAssertEqual(first.action, HC_CLICK)
+        let next = open.map { HCPoint(x: $0.x + 0.023, y: $0.y) }
+        for i in 1...6 { frame(next, 0.12 + Double(i) * 0.03) }
+        var grasp = next; grasp[4] = grasp[8]
+        frame(grasp, 0.33); frame(grasp, 0.36); frame(next, 0.39)
+        let second = frame(next, 0.42)
+        XCTAssertEqual(second.action, HC_CLICK)
+        XCTAssertEqual(second.clickCount, 1)
+        XCTAssertGreaterThan(second.position.x - first.position.x, 0.015)
+    }
+
     func testHoldDragDropsOnceWithoutClick() {
         frame(open, 1)
-        frame(pinch, 1.03)
-        XCTAssertEqual(frame(pinch, 1.36).action, HC_DOWN)
+        XCTAssertEqual(hold(pinch, from: 1.03, duration: 0.33).action, HC_DOWN)
         var moved = pinch
         for i in moved.indices { moved[i].x += 0.1 }
         let drag = frame(moved, 1.40)
         XCTAssertEqual(drag.action, HC_DRAGGED)
         XCTAssertGreaterThan(drag.position.x, s.anchor.x)
-        XCTAssertEqual(frame(open, 1.45).action, HC_UP)
-        XCTAssertEqual(frame(open, 1.48).action, HC_POINTER)
+        XCTAssertEqual(frame(open, 1.45).action, HC_NO_EVENT)
+        XCTAssertEqual(frame(open, 1.48).action, HC_UP)
+        XCTAssertEqual(frame(open, 1.52).action, HC_POINTER)
         XCTAssertEqual(hc_stop(&s).action, HC_NO_EVENT)
     }
 
     func testMissingOrStaleFramesReleaseAndReacquisitionCannotClick() {
-        frame(open, 1); frame(pinch, 1.04); frame(pinch, 1.38)
+        frame(open, 1); hold(pinch, from: 1.04)
         XCTAssertEqual(frame(pinch, 2.0).action, HC_UP)
         XCTAssertEqual(frame(pinch, 2.04).action, HC_NO_EVENT)
         XCTAssertEqual(frame(open, 2.10).action, HC_POINTER)
@@ -111,7 +227,7 @@ final class GestureTests: XCTestCase {
         var invalid = open; invalid[8].x = -1
         XCTAssertEqual(frame(invalid, 2.20).mode, HC_SEARCH)
         XCTAssertEqual(frame(open, 2.24).action, HC_POINTER)
-        frame(pinch, 2.28); frame(pinch, 2.62)
+        hold(pinch, from: 2.28)
         XCTAssertEqual(hc_lost(&s).action, HC_UP)
         XCTAssertEqual(hc_lost(&s).action, HC_NO_EVENT)
     }
@@ -121,7 +237,8 @@ final class GestureTests: XCTestCase {
         var right = open; right[4] = right[12]
         XCTAssertEqual(frame(right, 0.04).mode, HC_RIGHT_PINCH)
         XCTAssertEqual(frame(right, 0.18).action, HC_NO_EVENT)
-        XCTAssertEqual(frame(open, 0.22).action, HC_RIGHT_CLICK)
+        XCTAssertEqual(frame(open, 0.21).action, HC_NO_EVENT)
+        XCTAssertEqual(frame(open, 0.24).action, HC_RIGHT_CLICK)
         var two = open; two[12].y = 0.34
         XCTAssertEqual(frame(two, 0.26).mode, HC_SCROLL)
         two[8].y -= 0.04; two[12].y -= 0.04
@@ -135,7 +252,7 @@ final class GestureTests: XCTestCase {
     }
 
     func testCalibrationRequiresTwoStableOrderedCornersAndSuppressesInput() {
-        frame(open, 0); frame(pinch, 0.03); frame(pinch, 0.37)
+        frame(open, 0); hold(pinch, from: 0.03)
         XCTAssertEqual(hc_begin_calibration(&s).action, HC_UP)
         func pose(_ x: Double, _ y: Double) -> [HCPoint] {
             open.map { HCPoint(x: x + ($0.x - open[8].x) * 0.55, y: y + ($0.y - open[8].y) * 0.55) }
@@ -156,8 +273,10 @@ final class GestureTests: XCTestCase {
     func testMacAdapterProducesQuartzEventsWithoutPostingToDesktop() {
         var events: [CGEvent] = []
         let mouse = DesktopMouse { events.append($0) }
-        for (pose, t) in [(open,0.0), (pinch,0.04), (open,0.1), (pinch,0.16), (open,0.22),
-                          (pinch,0.26), (pinch,0.60), (pinch,0.64)] { mouse.apply(frame(pose,t)) }
+        for (pose, t) in [(open,0.0), (pinch,0.04), (pinch,0.07), (open,0.10), (open,0.13),
+                          (pinch,0.16), (pinch,0.19), (open,0.22), (open,0.25),
+                          (pinch,0.28), (pinch,0.32), (pinch,0.45), (pinch,0.55),
+                          (pinch,0.61), (pinch,0.65)] { mouse.apply(frame(pose,t)) }
         mouse.release()
         mouse.release()
         XCTAssertEqual(events.map(\.type), [.mouseMoved, .leftMouseDown, .leftMouseUp,
@@ -167,7 +286,8 @@ final class GestureTests: XCTestCase {
         var right = open; right[4] = right[12]
         var two = open; two[12].y = 0.34
         _ = hc_stop(&s)
-        mouse.apply(frame(open,1)); mouse.apply(frame(right,1.04)); mouse.apply(frame(open,1.14))
+        mouse.apply(frame(open,1)); mouse.apply(frame(right,1.04)); mouse.apply(frame(right,1.08))
+        mouse.apply(frame(open,1.12)); mouse.apply(frame(open,1.15))
         mouse.apply(frame(two,1.18)); two[8].y -= 0.03; two[12].y -= 0.03
         mouse.apply(frame(two,1.22))
         XCTAssertEqual(events.suffix(3).map(\.type), [.rightMouseDown, .rightMouseUp, .scrollWheel])

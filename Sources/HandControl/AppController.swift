@@ -181,7 +181,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         case HC_MOVE: text = "Move"
         case HC_PINCH: text = "Pinch: release to click or hold to drag"
         case HC_RIGHT_PINCH: text = "Middle pinch: release to right-click"
-        case HC_DRAG: text = "Dragging: release to drop"
+        case HC_DRAG: text = "Dragging: move your hand, then open the pinch to drop"
         case HC_SCROLL: text = "Scroll"
         case HC_PAUSE: text = "Paused: open your hand and separate your fingertips"
         case HC_CAL_FIRST: text = "1 of 2: point at your comfortable UPPER LEFT and hold still"

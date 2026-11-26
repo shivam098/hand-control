@@ -16,7 +16,7 @@ Select **Calibrate Reach**. Hold your index fingertip at the comfortable upper-l
 | --- | --- |
 | Move | Point with your index finger. |
 | Click / double-click | Pinch thumb and index, then release; repeat quickly for a double-click. |
-| Drag and drop | Hold the index pinch until **Dragging**, move, and release. |
+| Drag and drop | Hold the index pinch until **Dragging**, move your whole hand, then open the pinch. |
 | Right-click | Pinch thumb and middle finger, then release. |
 | Scroll | Extend only index and middle fingers and move vertically. |
 | Pause / resume | Make a fist; open your hand and separate your fingertips to resume. |

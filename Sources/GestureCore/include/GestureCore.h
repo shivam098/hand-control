@@ -25,8 +25,11 @@ typedef struct {
     HCRange range;
     HCMode mode;
     HCPoint cursor, anchor, lastClick, firstCorner, dwellAt;
+    HCPoint tipOffsets[2], quietDirection, dragOrigin;
     double doubleInterval, lastTime, pinchTime, clickTime, scrollY, scrollRest, dwellTime;
+    double quietSince, aimUntil, releaseSince;
     int hasCursor, needOpen, hasClick, calStage, dwelling;
+    int hasTipHistory, approachArmed, pinchConfirmed, pendingRelease;
 } HCState;
 
 HCRange hc_default_range(void);

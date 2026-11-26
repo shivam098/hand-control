@@ -5,6 +5,13 @@ static double clamp(double x, double lo, double hi) { return fmin(hi, fmax(x, lo
 static double distance(HCPoint a, HCPoint b, double aspect) {
     return hypot((a.x - b.x) * aspect, a.y - b.y);
 }
+static int visible(HCPoint p) {
+    return p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1;
+}
+static void reset_motion(HCState *s) {
+    s->hasTipHistory = 0;
+    s->quietDirection = (HCPoint){0, 0};
+}
 static HCOutput output(const HCState *s, HCAction action) {
     return (HCOutput){.mode = s->mode, .action = action, .position = s->cursor, .clickCount = 1};
 }
@@ -23,6 +30,9 @@ HCOutput hc_lost(HCState *s) {
     s->needOpen = 1;
     s->dwelling = s->hasCursor = s->hasClick = 0;
     s->scrollRest = 0;
+    s->approachArmed = 0;
+    s->aimUntil = 0;
+    reset_motion(s);
     return output(s, release);
 }
 HCOutput hc_stop(HCState *s) {
@@ -65,24 +75,113 @@ static HCPoint mapped(const HCState *s, HCPoint tip) {
     return (HCPoint){clamp((tip.x - s->range.left) / (s->range.right - s->range.left), 0, 1),
                      clamp((tip.y - s->range.top) / (s->range.bottom - s->range.top), 0, 1)};
 }
-static HCPoint smooth(HCPoint from, HCPoint to, double dt) {
-    // Error is measured in fractions of the calibrated screen. Keep a nonzero
-    // response even at rest so deliberate subpixel adjustments are never lost.
-    const double steadyError = .0035, sweepError = .045;
-    double u = clamp((distance(from, to, 1) - steadyError) / (sweepError - steadyError), 0, 1);
+static double median3(double a, double b, double c) {
+    return fmax(fmin(a, b), fmin(fmax(a, b), c));
+}
+static HCPoint pointing_target(HCState *s, HCPoint tip, HCPoint palm) {
+    // Median-filter finger motion relative to the palm, not the whole hand.
+    // A real hand translation is available immediately, without a frame of delay.
+    HCPoint offset = {tip.x - palm.x, tip.y - palm.y};
+    if (!s->hasTipHistory) {
+        s->tipOffsets[0] = s->tipOffsets[1] = offset;
+        s->hasTipHistory = 1;
+    }
+    HCPoint a = s->tipOffsets[0], b = s->tipOffsets[1];
+    s->tipOffsets[0] = b;
+    s->tipOffsets[1] = offset;
+    HCPoint target = mapped(s, (HCPoint){palm.x + median3(a.x, b.x, offset.x),
+                                         palm.y + median3(a.y, b.y, offset.y)});
+    HCPoint raw = mapped(s, tip);
+    return (HCPoint){clamp(target.x, fmin(s->cursor.x, raw.x), fmax(s->cursor.x, raw.x)),
+                     clamp(target.y, fmin(s->cursor.y, raw.y), fmax(s->cursor.y, raw.y))};
+}
+static HCPoint smooth(HCState *s, HCPoint to, double dt) {
+    HCPoint from = s->cursor, delta = {to.x - from.x, to.y - from.y};
+    const double steadyError = .004, sweepError = .045;
+    double error = hypot(delta.x, delta.y);
+    if (error <= steadyError) {
+        // Alternating small displacements are tremor; a sustained fine adjustment is not.
+        if (delta.x * s->quietDirection.x + delta.y * s->quietDirection.y <= 0) {
+            s->quietDirection = delta;
+            s->quietSince = s->lastTime;
+        }
+        if (s->lastTime - s->quietSince < .080) return from;
+    } else {
+        s->quietDirection = (HCPoint){0, 0};
+    }
+    double u = clamp((error - steadyError) / (sweepError - steadyError), 0, 1);
     double blend = u * u * (3 - 2 * u);
     double rate = (1 - blend) / .120 + blend / .008;
     double alpha = dt * rate / (1 + dt * rate);
     return (HCPoint){from.x + alpha * (to.x - from.x), from.y + alpha * (to.y - from.y)};
 }
+static const double pinchClose = .30, pinchOpen = .46;
+enum { NO_RELEASE, OPEN_RELEASE, FIST_RELEASE };
+
+static int confirmed_release(HCState *s, int observation, double now) {
+    if (s->pendingRelease != observation) {
+        s->pendingRelease = observation;
+        s->releaseSince = now;
+        return 0;
+    }
+    return now - s->releaseSince >= .025;
+}
+
+static HCOutput track_pinch(HCState *s, double gap, int open, HCPoint palm, double dt, double now) {
+    int right = s->mode == HC_RIGHT_PINCH;
+    if (!s->pinchConfirmed) {
+        if (gap > .36) {
+            s->mode = HC_MOVE;
+            s->needOpen = !open;
+            return output(s, HC_NO_EVENT);
+        }
+        if (now - s->pinchTime < .025) return output(s, HC_NO_EVENT);
+        s->pinchConfirmed = 1;
+    }
+    if (gap >= pinchOpen) {
+        if (!confirmed_release(s, OPEN_RELEASE, now)) return output(s, HC_NO_EVENT);
+        int dragging = s->mode == HC_DRAG;
+        s->mode = HC_MOVE;
+        s->needOpen = !open;
+        reset_motion(s);
+        if (dragging) return output(s, HC_UP);
+        if (right) return output(s, HC_RIGHT_CLICK);
+        HCOutput out = output(s, HC_CLICK);
+        if (s->hasClick && now - s->clickTime <= s->doubleInterval &&
+            distance(s->anchor, s->lastClick, 1) <= .009) {
+            out.clickCount = 2;
+            out.position = s->cursor = s->lastClick;
+            s->hasClick = 0;
+        } else {
+            s->lastClick = s->anchor;
+            s->clickTime = now;
+            s->hasClick = 1;
+        }
+        return out;
+    }
+    s->pendingRelease = NO_RELEASE;
+    if (right) return output(s, HC_NO_EVENT);
+    if (s->mode == HC_PINCH) {
+        if (now - s->pinchTime < .32) return output(s, HC_NO_EVENT);
+        s->mode = HC_DRAG;
+        s->hasClick = 0;
+        s->dragOrigin = palm;
+        return output(s, HC_DOWN);
+    }
+    HCRange r = s->range;
+    HCPoint target = {clamp(s->anchor.x + (palm.x - s->dragOrigin.x) / (r.right - r.left), 0, 1),
+                      clamp(s->anchor.y + (palm.y - s->dragOrigin.y) / (r.bottom - r.top), 0, 1)};
+    s->cursor = smooth(s, target, dt);
+    return output(s, HC_DRAGGED);
+}
 HCOutput hc_frame(HCState *s, const HCPoint p[21], double aspect, double now) {
     if (!p || !isfinite(aspect) || aspect <= 0 || !isfinite(now)) return hc_lost(s);
-    const int used[] = {0, 4, 5, 6, 8, 9, 10, 12, 14, 16, 17, 18, 20};
-    for (unsigned i = 0; i < sizeof used / sizeof *used; ++i) {
-        HCPoint v = p[used[i]];
-        if (!isfinite(v.x) || !isfinite(v.y) || v.x < 0 || v.y < 0 || v.x > 1 || v.y > 1)
-            return hc_lost(s);
-    }
+    const int essential[] = {0, 4, 5, 8, 9, 17};
+    for (unsigned i = 0; i < sizeof essential / sizeof *essential; ++i)
+        if (!visible(p[essential[i]])) return hc_lost(s);
+    int left = s->mode == HC_PINCH || s->mode == HC_DRAG;
+    int activePinch = left || s->mode == HC_RIGHT_PINCH;
+    if (!left && !visible(p[12])) return hc_lost(s);
     double palm = fmax(distance(p[0], p[9], aspect), distance(p[5], p[17], aspect));
     if (palm < .035) return hc_lost(s);
     double dt = clamp(now - s->lastTime, .001, .15);
@@ -90,26 +189,38 @@ HCOutput hc_frame(HCState *s, const HCPoint p[21], double aspect, double now) {
         s->lastTime = now;
         return hc_lost(s);
     }
+    if (activePinch && now - s->lastTime > .15) {
+        s->pendingRelease = NO_RELEASE;
+        if (s->mode != HC_DRAG) {
+            s->pinchTime = now;
+            s->pinchConfirmed = 0;
+        }
+    }
     s->lastTime = now;
     double reach[4];
-    for (int i = 0; i < 4; ++i)
-        reach[i] = distance(p[8 + 4*i], p[0], aspect) /
-                   fmax(.01, distance(p[6 + 4*i], p[0], aspect));
+    int fullPose = 1;
+    for (int i = 0; i < 4; ++i) {
+        HCPoint tip = p[8 + 4*i], pip = p[6 + 4*i];
+        reach[i] = visible(tip) && visible(pip)
+                   ? distance(tip, p[0], aspect) / fmax(.01, distance(pip, p[0], aspect)) : NAN;
+        if (!isfinite(reach[i])) fullPose = 0;
+    }
     if (s->calStage) return calibrate(s, p[8], reach[0] > 1.15, aspect, now);
 
     double indexGap = distance(p[4], p[8], aspect) / palm;
-    double middleGap = distance(p[4], p[12], aspect) / palm;
-    int open = indexGap > .46 && middleGap > .46;
+    double middleGap = visible(p[12]) ? distance(p[4], p[12], aspect) / palm : NAN;
+    int open = indexGap > pinchOpen && middleGap > pinchOpen;
+    if (!(activePinch && s->pinchConfirmed) && !fullPose && !(open && reach[0] > 1.15 && reach[1] < 1.12))
+        return hc_lost(s);
     int fist = reach[0] < 1.03 && reach[1] < 1.03 && reach[2] < 1.03 && reach[3] < 1.03;
     if (fist) {
+        // A still-visible pinch can look curled for one frame. Freeze at once,
+        // but require a second fist observation before cancelling a held button.
+        if (activePinch && s->pinchConfirmed && (left ? indexGap : middleGap) < pinchOpen &&
+            !confirmed_release(s, FIST_RELEASE, now)) return output(s, HC_NO_EVENT);
         HCOutput out = hc_lost(s);
         out.mode = s->mode = HC_PAUSE;
         return out;
-    }
-    HCPoint target = mapped(s, p[8]);
-    if (!s->hasCursor) {
-        s->cursor = target;
-        s->hasCursor = 1;
     }
     if (s->needOpen) {
         if (!open) {
@@ -119,45 +230,22 @@ HCOutput hc_frame(HCState *s, const HCPoint p[21], double aspect, double now) {
         s->needOpen = 0;
         s->mode = HC_MOVE;
     }
-    if (s->mode == HC_PINCH || s->mode == HC_DRAG) {
-        if (indexGap >= .46) {
-            int dragging = s->mode == HC_DRAG;
-            s->mode = HC_MOVE;
-            s->needOpen = !open;
-            if (dragging) return output(s, HC_UP);
-            if (now - s->pinchTime < .035) return output(s, HC_NO_EVENT);
-            HCOutput out = output(s, HC_CLICK);
-            if (s->hasClick && now - s->clickTime <= s->doubleInterval &&
-                distance(s->anchor, s->lastClick, 1) <= .028) {
-                out.clickCount = 2;
-                out.position = s->cursor = s->lastClick;
-                s->hasClick = 0;
-            } else {
-                s->lastClick = s->anchor;
-                s->clickTime = now;
-                s->hasClick = 1;
-            }
-            return out;
-        }
-        if (s->mode == HC_PINCH) {
-            if (now - s->pinchTime < .32) return output(s, HC_NO_EVENT);
-            s->mode = HC_DRAG;
-            s->hasClick = 0;
-            return output(s, HC_DOWN);
-        }
-        s->cursor = smooth(s->cursor, target, dt);
-        return output(s, HC_DRAGGED);
+    if (!s->hasCursor) {
+        s->cursor = mapped(s, p[8]);
+        s->hasCursor = 1;
     }
-    if (s->mode == HC_RIGHT_PINCH) {
-        if (middleGap < .46) return output(s, HC_NO_EVENT);
-        s->mode = HC_MOVE;
-        s->needOpen = !open;
-        return output(s, now - s->pinchTime >= .035 ? HC_RIGHT_CLICK : HC_NO_EVENT);
-    }
-    if (fmin(indexGap, middleGap) <= .30) {
+    HCPoint center = {(p[0].x + p[5].x + p[9].x + p[17].x) / 4,
+                      (p[0].y + p[5].y + p[9].y + p[17].y) / 4};
+    if (activePinch) return track_pinch(s, left ? indexGap : middleGap, open, center, dt, now);
+    double gap = fmin(indexGap, middleGap);
+    if (gap <= pinchClose) {
         s->mode = indexGap <= middleGap ? HC_PINCH : HC_RIGHT_PINCH;
         s->pinchTime = now;
+        s->pinchConfirmed = s->approachArmed = 0;
+        s->pendingRelease = NO_RELEASE;
+        s->aimUntil = 0;
         s->anchor = s->cursor;
+        reset_motion(s);
         if (s->mode == HC_RIGHT_PINCH) s->hasClick = 0;
         return output(s, HC_NO_EVENT);
     }
@@ -171,6 +259,9 @@ HCOutput hc_frame(HCState *s, const HCPoint p[21], double aspect, double now) {
             if (out.wheel) out.action = HC_WHEEL;
         } else {
             s->scrollRest = 0;
+            s->approachArmed = 0;
+            s->aimUntil = 0;
+            reset_motion(s);
         }
         s->scrollY = y;
         s->hasClick = 0;
@@ -178,6 +269,16 @@ HCOutput hc_frame(HCState *s, const HCPoint p[21], double aspect, double now) {
         return out;
     }
     s->mode = HC_MOVE;
-    s->cursor = smooth(s->cursor, target, dt);
+    // Freeze the last aim before the fingers touch. Cap the hold so hovering
+    // with the thumb nearby cannot indefinitely disable pointing.
+    if (gap >= .70) {
+        s->approachArmed = 1;
+        s->aimUntil = 0;
+    } else if (gap <= .60 && s->approachArmed) {
+        s->approachArmed = 0;
+        s->aimUntil = now + .16;
+    }
+    if (now < s->aimUntil) return output(s, HC_NO_EVENT);
+    s->cursor = smooth(s, pointing_target(s, p[8], center), dt);
     return output(s, HC_POINTER);
 }

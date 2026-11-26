@@ -112,7 +112,7 @@ class HandWindow {
         case HC_MOVE: status = L"Move"; break;
         case HC_PINCH: status = L"Pinch: release to click or hold to drag"; break;
         case HC_RIGHT_PINCH: status = L"Middle pinch: release to right-click"; break;
-        case HC_DRAG: status = L"Dragging: release to drop"; break;
+        case HC_DRAG: status = L"Dragging: move your hand, then open the pinch to drop"; break;
         case HC_SCROLL: status = L"Scroll"; break;
         case HC_PAUSE: status = L"Paused: open your hand and separate your fingertips"; break;
         case HC_CAL_FIRST: status = L"1 of 2: point at your comfortable UPPER LEFT and hold still"; break;
