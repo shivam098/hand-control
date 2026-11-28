@@ -27,8 +27,10 @@ publisher-signed; check your device's software policies before running it.
 Windows N editions need Microsoft's Media Feature Pack for webcam capture.
 
 YOUR FIRST MINUTE
-1. Face the webcam in good light. Show one hand, palm toward the camera,
-   with all fingertips in view. The camera image is mirrored like a mirror.
+1. Choose your camera from the menu (built-in, external 720p/60fps webcam, or
+   iPhone Continuity Camera on Mac) and face it in good light. The camera image
+   is mirrored like a mirror, and tracking continues even if your wrist sits low
+   near the bottom edge of the frame.
 2. Click Calibrate Reach. Point with your index finger at the upper-left
    extent of YOUR comfortable reach in the preview; hold until the prompt
    changes. Then hold at the lower right. These two positions map to the
@@ -38,19 +40,24 @@ YOUR FIRST MINUTE
    at something harmless like the title bar of an empty window.
 
 GESTURES
-Move         Point with your index finger and move your hand.
+Move         Point comfortably and move your hand. A knuckle-anchored precision
+             curve keeps fine text targeting steady while fast sweeps reach far.
 Click        Briefly touch thumb to index fingertip and release.
-Double-click Make two quick, distinct index pinches over the same target.
-Drag/drop    Hold the index pinch until "Dragging" appears, move your whole
-             hand, then open the pinch to drop. The palm guides the drag.
+Double-click Pinch thumb + index twice (magnetic target lock keeps the second
+             pinch on target), OR pinch thumb + index + middle together once.
+Select/drag  Pinch thumb + index and immediately glide to highlight text or
+             drag items, or hold stationary briefly (~0.3s), then open to drop.
 Right-click  Touch thumb to middle fingertip, then release.
 Scroll       Extend only index and middle fingers; fold ring and little
              fingers, keep the thumb clear, then move both fingers up/down.
 Pause        Make a closed fist. Open your hand with fingertips apart to resume.
 
-Minimize the window to control other apps. Closing it or clicking Stop Camera
-stops capture and releases a held drag. Losing sight of the hand also releases
-a drag; a pinch already held when tracking returns cannot start a click.
+Minimize the window to control other apps. While active, the click-through
+Cursor Halo ring around the pointer shows tracking confidence, pinch progress,
+and active selection/drag state (toggleable with "Halo: On/Off"). Closing the
+window or clicking Stop Camera stops capture and releases a held drag. Losing
+sight of the hand past the brief coasting grace window also releases a drag; a
+pinch already held when tracking returns cannot start a click.
 The camera feed stays on the device. It is not recorded or uploaded.
 
 Pointer smoothing is automatic. Aiming stays steady against brief fingertip

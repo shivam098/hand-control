@@ -82,6 +82,39 @@ struct Source {
     ~Source() { if (media) media->Shutdown(); }
 };
 
+static std::wstring getAttrString(IMFActivate *item, const GUID &guid) {
+    WCHAR *raw = nullptr;
+    UINT32 len = 0;
+    if (FAILED(item->GetAllocatedString(guid, &raw, &len)) || !raw) return {};
+    std::wstring value(raw, len);
+    CoTaskMemFree(raw);
+    return value;
+}
+
+std::vector<CameraDeviceInfo> Camera::listDevices() {
+    std::vector<CameraDeviceInfo> list;
+    auto com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    bool uninit = SUCCEEDED(com);
+    if (SUCCEEDED(MFStartup(MF_VERSION))) {
+        ComPtr<IMFAttributes> attrs;
+        if (SUCCEEDED(MFCreateAttributes(&attrs, 1)) &&
+            SUCCEEDED(attrs->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID))) {
+            Devices devices;
+            if (SUCCEEDED(MFEnumDeviceSources(attrs.Get(), &devices.items, &devices.count))) {
+                for (UINT32 i = 0; i < devices.count; ++i) {
+                    auto name = getAttrString(devices.items[i], MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME);
+                    auto id = getAttrString(devices.items[i], MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK);
+                    if (name.empty()) name = L"Camera " + std::to_wstring(i + 1);
+                    list.push_back({std::move(id), std::move(name)});
+                }
+            }
+        }
+        MFShutdown();
+    }
+    if (uninit) CoUninitialize();
+    return list;
+}
+
 static void selectVideoFormat(IMFSourceReader *reader) {
     ComPtr<IMFMediaType> best;
     double bestScore = 1e30;
@@ -92,9 +125,12 @@ static void selectVideoFormat(IMFSourceReader *reader) {
         checked(hr, "Listing webcam formats");
         UINT32 w{}, h{}, n{}, d{};
         if (FAILED(MFGetAttributeSize(type.Get(), MF_MT_FRAME_SIZE, &w, &h)) || !w || !h) continue;
+        if (w > 1920 || h > 1440) continue;
         double fps = SUCCEEDED(MFGetAttributeRatio(type.Get(), MF_MT_FRAME_RATE, &n, &d)) && d ? double(n) / d : 30;
-        double score = std::abs(std::log(double(w) / 640)) + std::abs(std::log(double(h) / 480))
-                       + std::abs(fps - 30) * .008 + (fps < 15 ? 3 : 0);
+        double resScore = std::abs(std::log(double(w) / 1280.0)) + std::abs(std::log(double(h) / 720.0));
+        double aspectPenalty = std::abs((double(w) / h) - (16.0 / 9.0)) * 0.30;
+        double fpsBonus = (fps >= 58 && fps <= 62) ? -0.18 : (std::abs(fps - 30.0) * .008 + (fps < 15 ? 3 : 0));
+        double score = resScore + aspectPenalty + fpsBonus;
         if (score < bestScore) { bestScore = score; best = type; }
     }
     if (!best) throw std::runtime_error("The webcam has no usable video formats.");
@@ -147,16 +183,17 @@ struct LockedPixels {
     }
 };
 
-Camera::Camera(std::filesystem::path model) : stopEvent(CreateEventW(nullptr, TRUE, FALSE, nullptr)) {
+Camera::Camera(std::filesystem::path model, std::wstring preferredDeviceId)
+    : stopEvent(CreateEventW(nullptr, TRUE, FALSE, nullptr)) {
     if (!stopEvent) throw std::runtime_error("Could not initialize camera control.");
-    worker = std::thread([this, model = std::move(model)] {
+    worker = std::thread([this, model = std::move(model), preferredDeviceId = std::move(preferredDeviceId)] {
         auto com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         bool mf = false;
         try {
             checked(com, "Initializing Windows camera services");
             checked(MFStartup(MF_VERSION), "Starting Media Foundation");
             mf = true;
-            capture(model);
+            capture(model, preferredDeviceId);
         } catch (const std::exception &e) {
             std::lock_guard<std::mutex> lock(guard);
             failure = e.what();
@@ -175,7 +212,7 @@ std::shared_ptr<CameraFrame> Camera::take(std::string &error) {
     return std::exchange(latest, {});
 }
 
-void Camera::capture(const std::filesystem::path &model) {
+void Camera::capture(const std::filesystem::path &model, const std::wstring &preferredDeviceId) {
     Tracker tracker(model);
     if (WaitForSingleObject(stopEvent, 0) == WAIT_OBJECT_0) return;
     ComPtr<IMFAttributes> attrs;
@@ -184,8 +221,17 @@ void Camera::capture(const std::filesystem::path &model) {
     Devices devices;
     checked(MFEnumDeviceSources(attrs.Get(), &devices.items, &devices.count), "Finding cameras");
     if (!devices.count) throw std::runtime_error("No webcam found. Connect a camera and allow desktop apps in Camera settings.");
+    UINT32 chosen = 0;
+    if (!preferredDeviceId.empty()) {
+        for (UINT32 i = 0; i < devices.count; ++i) {
+            if (getAttrString(devices.items[i], MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK) == preferredDeviceId) {
+                chosen = i;
+                break;
+            }
+        }
+    }
     Source source;
-    checked(devices.items[0]->ActivateObject(IID_PPV_ARGS(&source.media)), "Opening webcam; check Camera settings and close other camera apps");
+    checked(devices.items[chosen]->ActivateObject(IID_PPV_ARGS(&source.media)), "Opening webcam; check Camera settings and close other camera apps");
     ComPtr<Callback> callback;
     callback.Attach(new Callback());
     ComPtr<IMFAttributes> readerAttrs;
@@ -214,22 +260,33 @@ void Camera::capture(const std::filesystem::path &model) {
         frame->height = f.height;
         frame->time = packet.time;
         frame->mirroredBGRA.resize(size_t(f.width) * f.height);
-        rgb.resize(frame->mirroredBGRA.size() * 3);
+        unsigned step = (f.width >= 1280 && f.height >= 720) ? 2u : 1u;
+        unsigned tw = f.width / step, th = f.height / step;
+        rgb.resize(size_t(tw) * th * 3);
         {
             LockedPixels video;
             video.load(packet.sample.Get(), f);
             for (unsigned y = 0; y < f.height; ++y) {
                 const BYTE *row = video.top + int64_t(y) * video.stride;
                 for (unsigned x = 0; x < f.width; ++x) {
-                    size_t i = size_t(y) * f.width + x;
                     const BYTE *b = row + x * 4;
-                    rgb[3*i] = b[2]; rgb[3*i+1] = b[1]; rgb[3*i+2] = b[0];
-                    frame->mirroredBGRA[size_t(y+1)*f.width-1-x] = uint32_t(b[0]) | uint32_t(b[1]) << 8 | uint32_t(b[2]) << 16;
+                    frame->mirroredBGRA[size_t(y + 1) * f.width - 1 - x] =
+                        uint32_t(b[0]) | uint32_t(b[1]) << 8 | uint32_t(b[2]) << 16;
+                }
+            }
+            for (unsigned ty = 0; ty < th; ++ty) {
+                const BYTE *row = video.top + int64_t(ty * step) * video.stride;
+                for (unsigned tx = 0; tx < tw; ++tx) {
+                    const BYTE *b = row + (tx * step) * 4;
+                    size_t ti = (size_t(ty) * tw + tx) * 3;
+                    rgb[ti] = b[2]; rgb[ti + 1] = b[1]; rgb[ti + 2] = b[0];
                 }
             }
         }
         lastStamp = std::max(lastStamp + 1, static_cast<int64_t>(frame->time * 1000));
-        frame->found = tracker.detect(rgb.data(), f.width, f.height, lastStamp, frame->points);
+        frame->found = tracker.detect(rgb.data(), static_cast<int>(tw), static_cast<int>(th),
+                                      lastStamp, frame->points, frame->confidence,
+                                      frame->worldPoints, frame->hasWorld);
         std::lock_guard<std::mutex> lock(guard);
         latest = std::move(frame);
     }

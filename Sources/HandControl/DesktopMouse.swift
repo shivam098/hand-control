@@ -42,6 +42,10 @@ final class DesktopMouse {
         case HC_POINTER: post(.mouseMoved, at: p)
         case HC_CLICK, HC_RIGHT_CLICK:
             let right = out.action == HC_RIGHT_CLICK
+            if !right && out.synthesized != 0 && out.clickCount == 2 {
+                post(.leftMouseDown, at: p, button: .left, count: 1)
+                post(.leftMouseUp, at: p, button: .left, count: 1)
+            }
             post(right ? .rightMouseDown : .leftMouseDown, at: p, button: right ? .right : .left, count: Int64(out.clickCount))
             post(right ? .rightMouseUp : .leftMouseUp, at: p, button: right ? .right : .left, count: Int64(out.clickCount))
         case HC_DOWN:

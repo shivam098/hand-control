@@ -23,18 +23,25 @@ public:
     }
     void apply(HCOutput out) {
         if (out.mode != HC_SCROLL) wheelRest = 0;
-        INPUT events[3]{};
+        INPUT events[5]{};
         UINT n = 0;
         auto move = input(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE);
         move.mi.dx = static_cast<LONG>(out.position.x * 65535 + .5);
         move.mi.dy = static_cast<LONG>(out.position.y * 65535 + .5);
         switch (out.action) {
         case HC_POINTER: case HC_DRAGGED: events[n++] = move; break;
-        case HC_CLICK: case HC_RIGHT_CLICK:
+        case HC_CLICK: case HC_RIGHT_CLICK: {
+            DWORD downFlag = out.action == HC_CLICK ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_RIGHTDOWN;
+            DWORD upFlag = out.action == HC_CLICK ? MOUSEEVENTF_LEFTUP : MOUSEEVENTF_RIGHTUP;
             events[n++] = move;
-            events[n++] = input(out.action == HC_CLICK ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_RIGHTDOWN);
-            events[n++] = input(out.action == HC_CLICK ? MOUSEEVENTF_LEFTUP : MOUSEEVENTF_RIGHTUP);
+            events[n++] = input(downFlag);
+            events[n++] = input(upFlag);
+            if (out.action == HC_CLICK && out.synthesized && out.clickCount == 2) {
+                events[n++] = input(downFlag);
+                events[n++] = input(upFlag);
+            }
             break;
+        }
         case HC_DOWN: events[n++] = move; events[n++] = input(MOUSEEVENTF_LEFTDOWN); break;
         case HC_UP:
             if (!release()) throw std::runtime_error("Windows blocked the mouse release.");
@@ -52,7 +59,7 @@ public:
         }
         UINT sent = SendInput(n, events, sizeof(INPUT));
         if (sent != n) {
-            if ((out.action == HC_CLICK || out.action == HC_RIGHT_CLICK) && sent == 2) {
+            if ((out.action == HC_CLICK || out.action == HC_RIGHT_CLICK) && (sent == 2 || sent == 4)) {
                 auto up = events[2];
                 SendInput(1, &up, sizeof(up));
             }

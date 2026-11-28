@@ -24,6 +24,9 @@ Tracker::Tracker(const std::filesystem::path &model) {
     options.base_options.model_asset_buffer_count = static_cast<unsigned int>(modelBytes.size());
     options.running_mode = VIDEO;
     options.num_hands = 1;
+    options.min_hand_detection_confidence = 0.35f;
+    options.min_hand_presence_confidence = 0.35f;
+    options.min_tracking_confidence = 0.32f;
     char *message = nullptr;
     auto status = MpHandLandmarkerCreate(&options, &handle, &message);
     check(status, message, "Opening hand model");
@@ -38,7 +41,9 @@ Tracker::~Tracker() {
     }
 }
 
-bool Tracker::detect(const uint8_t *rgb, int width, int height, int64_t milliseconds, std::array<HCPoint,21> &points) {
+bool Tracker::detect(const uint8_t *rgb, int width, int height, int64_t milliseconds,
+                     std::array<HCPoint,21> &points, std::array<double,21> &confidence,
+                     std::array<HCPoint3D,21> &worldPoints, bool &hasWorld) {
     MpImagePtr raw = nullptr;
     char *message = nullptr;
     auto status = MpImageCreateFromUint8Data(kMpImageFormatSrgb, width, height, rgb, width * height * 3, &raw, &message);
@@ -48,10 +53,33 @@ bool Tracker::detect(const uint8_t *rgb, int width, int height, int64_t millisec
     status = MpHandLandmarkerDetectForVideo(handle, image.get(), nullptr, milliseconds, &result, &message);
     check(status, message, "Tracking hand");
     bool found = result.hand_landmarks_count > 0 && result.hand_landmarks[0].landmarks_count == points.size();
+    hasWorld = false;
     if (found) {
+        double baseScore = 0.85;
+        if (result.handedness_count > 0 && result.handedness[0].categories_count > 0) {
+            float s = result.handedness[0].categories[0].score;
+            if (s > 0.05f && s <= 1.0f) baseScore = s;
+        }
         for (size_t i = 0; i < points.size(); ++i) {
             const auto &p = result.hand_landmarks[0].landmarks[i];
-            points[i] = {1.0 - p.x, p.y};
+            double mx = 1.0 - p.x, my = p.y;
+            points[i] = {mx, my};
+            double c = baseScore;
+            if (p.has_presence) c = std::min(c, static_cast<double>(p.presence));
+            if (p.has_visibility) c = std::min(c, static_cast<double>(p.visibility));
+            // De-weight MediaPipe border-extrapolated joints so wrist-optional knuckle geometry
+            // takes over cleanly when the wrist or palm base sits below the bottom frame edge.
+            if (mx < 0.0 || mx > 1.0 || my < 0.0 || my > 1.0) c = 0.0;
+            else if (mx < 0.02 || mx > 0.98 || my < 0.02 || my > 0.96) c = std::min(c, 0.16);
+            confidence[i] = std::max(0.0, std::min(1.0, c));
+        }
+        if (result.hand_world_landmarks_count > 0 &&
+            result.hand_world_landmarks[0].landmarks_count == worldPoints.size()) {
+            hasWorld = true;
+            for (size_t i = 0; i < worldPoints.size(); ++i) {
+                const auto &w = result.hand_world_landmarks[0].landmarks[i];
+                worldPoints[i] = {-static_cast<double>(w.x), static_cast<double>(w.y), static_cast<double>(w.z)};
+            }
         }
     }
     MpHandLandmarkerCloseResult(&result);

@@ -18,17 +18,22 @@ final class VideoReplayTests: XCTestCase {
         generator.requestedTimeToleranceAfter = CMTime(value: 1, timescale: 15)
         let vision = HandVision()
         var found = false
-        let count = max(1, Int(min(36, ceil(duration))))
+        var core = HCState()
+        hc_init(&core, hc_default_range(), 0.5)
+        let count = max(1, Int(min(72, ceil(duration * 3))))
         for sample in 0..<count {
             let second = duration * Double(sample) / Double(count)
             let (image, _) = try await generator.image(at: CMTime(seconds: second, preferredTimescale: 600))
-            if let points = try vision.points(using: VNImageRequestHandler(cgImage: image, options: [:])) {
-                var core = HCState()
-                hc_init(&core, hc_default_range(), 0.5)
-                if hc_frame(&core, points, Double(image.width) / Double(image.height), Double(second)).mode != HC_SEARCH {
-                    found = true
-                    break
-                }
+            let aspect = Double(image.width) / Double(image.height)
+            let out: HCOutput
+            if let hand = try vision.observe(using: VNImageRequestHandler(cgImage: image, options: [:])) {
+                out = hc_frame_weighted(&core, hand.points, hand.confidence, nil, aspect, Double(second))
+            } else {
+                out = hc_coast(&core, Double(second))
+            }
+            if out.mode != HC_SEARCH {
+                found = true
+                break
             }
         }
         XCTAssertTrue(found, "No usable hand detected in the supplied clip.")

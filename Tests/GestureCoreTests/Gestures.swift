@@ -292,4 +292,153 @@ final class GestureTests: XCTestCase {
         mouse.apply(frame(two,1.22))
         XCTAssertEqual(events.suffix(3).map(\.type), [.rightMouseDown, .rightMouseUp, .scrollWheel])
     }
+
+    func testClippedWristAndLowConfidenceCurledFingersStillTrackAndClick() {
+        var clipped = open
+        clipped[0] = HCPoint(x: -1, y: -1)
+        var conf = Array(repeating: 0.88, count: 21)
+        conf[0] = 0.0
+        for j in 13...20 { conf[j] = 0.08 }
+
+        let initial = hc_frame_weighted(&s, clipped, conf, nil, 16.0 / 9.0, 0.0)
+        XCTAssertEqual(initial.mode, HC_MOVE)
+        XCTAssertEqual(initial.action, HC_POINTER)
+
+        var clippedPinch = clipped
+        clippedPinch[4] = clippedPinch[8]
+        _ = hc_frame_weighted(&s, clippedPinch, conf, nil, 16.0 / 9.0, 0.04)
+        let held = hc_frame_weighted(&s, clippedPinch, conf, nil, 16.0 / 9.0, 0.07)
+        XCTAssertEqual(held.mode, HC_PINCH)
+        _ = hc_frame_weighted(&s, clipped, conf, nil, 16.0 / 9.0, 0.11)
+        let released = hc_frame_weighted(&s, clipped, conf, nil, 16.0 / 9.0, 0.14)
+        XCTAssertEqual(released.action, HC_CLICK)
+        XCTAssertEqual(released.clickCount, 1)
+    }
+
+    func testShortOcclusionCoastsThroughActiveDragWhileLongLossReleasesSafely() {
+        let fullConf = Array(repeating: 0.9, count: 21)
+        _ = hc_frame_weighted(&s, open, fullConf, nil, 1, 0.0)
+        var t = 0.03
+        var down = HCOutput()
+        while t <= 0.37 {
+            down = hc_frame_weighted(&s, pinch, fullConf, nil, 1, t)
+            t += 0.03
+        }
+        XCTAssertEqual(down.mode, HC_DRAG)
+
+        let coast1 = hc_coast(&s, 0.40)
+        let coast2 = hc_coast(&s, 0.44)
+        XCTAssertEqual(coast1.mode, HC_DRAG)
+        XCTAssertEqual(coast2.mode, HC_DRAG)
+        XCTAssertNotEqual(coast2.action, HC_UP)
+
+        let moved = pinch.map { HCPoint(x: $0.x + 0.06, y: $0.y) }
+        let resumed = hc_frame_weighted(&s, moved, fullConf, nil, 1, 0.48)
+        XCTAssertEqual(resumed.mode, HC_DRAG)
+        XCTAssertEqual(resumed.action, HC_DRAGGED)
+
+        _ = hc_coast(&s, 0.52)
+        let expired = hc_coast(&s, 0.65)
+        XCTAssertEqual(expired.action, HC_UP)
+        XCTAssertEqual(expired.mode, HC_SEARCH)
+    }
+
+    func testVelocityPrePinchBrakeLocksAimFromRelaxedMidGapAndSlowClosing() {
+        hc_init(&s, HCRange(left: 0, top: 0, right: 1, bottom: 1), 0.5)
+        var midOpen = open
+        midOpen[4] = HCPoint(x: 0.34, y: 0.44)
+        _ = frame(midOpen, 0.0)
+        let aimed = frame(midOpen, 0.04).position
+
+        for step in 1...7 {
+            let frac = Double(step) / 7.0
+            var closing = midOpen
+            closing[8].x += 0.014 * frac
+            closing[8].y += 0.030 * frac
+            closing[4].x = closing[8].x - (1.0 - frac) * 0.07
+            closing[4].y = closing[8].y + (1.0 - frac) * 0.07
+            let out = frame(closing, 0.04 + Double(step) * 0.035)
+            if step >= 2 && out.mode == HC_MOVE {
+                XCTAssertEqual(out.locked, 1)
+            }
+        }
+        var closed = midOpen
+        closed[8].x += 0.014; closed[8].y += 0.030
+        closed[4] = closed[8]
+        frame(closed, 0.32)
+        frame(closed, 0.35)
+        frame(midOpen, 0.39)
+        let click = frame(midOpen, 0.42)
+        XCTAssertEqual(click.action, HC_CLICK)
+        XCTAssertLessThan(hypot(click.position.x - aimed.x, click.position.y - aimed.y) * 1600.0, 2.5)
+    }
+
+    func testInstantMoveToSelectStartsDragWithin80msAtExactAnchor() {
+        hc_init(&s, HCRange(left: 0, top: 0, right: 1, bottom: 1), 0.5)
+        let target = frame(open, 0.0).position
+        frame(pinch, 0.03)
+        frame(pinch, 0.06)
+        let glided = pinch.map { HCPoint(x: $0.x + 0.022, y: $0.y) }
+        let startDrag = frame(glided, 0.10)
+        XCTAssertEqual(startDrag.mode, HC_DRAG)
+        XCTAssertEqual(startDrag.action, HC_DOWN)
+        XCTAssertEqual(startDrag.position.x, target.x, accuracy: 0.001)
+        XCTAssertEqual(startDrag.position.y, target.y, accuracy: 0.001)
+
+        let glidedFurther = pinch.map { HCPoint(x: $0.x + 0.055, y: $0.y) }
+        let selecting = frame(glidedFurther, 0.13)
+        XCTAssertEqual(selecting.action, HC_DRAGGED)
+        XCTAssertGreaterThan(selecting.position.x, target.x + 0.01)
+    }
+
+    func testMagneticDoubleClickAndThreeFingerSynthesizedDoubleClick() {
+        let firstAim = frame(open, 0.0).position
+        frame(pinch, 0.04); frame(pinch, 0.07)
+        frame(open, 0.10)
+        let click1 = frame(open, 0.13)
+        XCTAssertEqual(click1.action, HC_CLICK)
+        XCTAssertEqual(click1.clickCount, 1)
+
+        let recoiledOpen = open.map { HCPoint(x: $0.x + 0.008, y: $0.y - 0.005) }
+        let recoiledPinch = pinch.map { HCPoint(x: $0.x + 0.008, y: $0.y - 0.005) }
+        let magnetized = frame(recoiledOpen, 0.17)
+        XCTAssertEqual(magnetized.locked, 1)
+        XCTAssertEqual(magnetized.position.x, click1.position.x, accuracy: 0.0001)
+        frame(recoiledPinch, 0.21); frame(recoiledPinch, 0.24)
+        frame(recoiledOpen, 0.28)
+        let click2 = frame(recoiledOpen, 0.31)
+        XCTAssertEqual(click2.action, HC_CLICK)
+        XCTAssertEqual(click2.clickCount, 2)
+        XCTAssertEqual(click2.synthesized, 0)
+        XCTAssertEqual(click2.position.x, firstAim.x, accuracy: 0.001)
+
+        var events: [CGEvent] = []
+        let mouse = DesktopMouse { events.append($0) }
+        hc_init(&s, hc_default_range(), 0.5)
+        let conf = Array(repeating: 0.92, count: 21)
+        let worldOpen = open.map { HCPoint3D(x: $0.x * 0.18, y: $0.y * 0.18, z: 0.0) }
+        _ = hc_frame_weighted(&s, open, conf, worldOpen, 1, 1.0)
+        var triple = open
+        triple[8] = HCPoint(x: 0.42, y: 0.38)
+        triple[12] = HCPoint(x: 0.43, y: 0.39)
+        triple[4] = HCPoint(x: 0.425, y: 0.385)
+        var worldTriple = worldOpen
+        worldTriple[8] = HCPoint3D(x: 0.075, y: 0.068, z: 0.0)
+        worldTriple[12] = HCPoint3D(x: 0.077, y: 0.070, z: 0.004)
+        worldTriple[4] = HCPoint3D(x: 0.076, y: 0.069, z: 0.002)
+
+        _ = hc_frame_weighted(&s, triple, conf, worldTriple, 1, 1.04)
+        let heldTriple = hc_frame_weighted(&s, triple, conf, worldTriple, 1, 1.08)
+        XCTAssertEqual(heldTriple.mode, HC_DOUBLE_PINCH)
+        _ = hc_frame_weighted(&s, open, conf, worldOpen, 1, 1.12)
+        let releasedTriple = hc_frame_weighted(&s, open, conf, worldOpen, 1, 1.16)
+        XCTAssertEqual(releasedTriple.action, HC_CLICK)
+        XCTAssertEqual(releasedTriple.clickCount, 2)
+        XCTAssertEqual(releasedTriple.synthesized, 1)
+
+        mouse.apply(releasedTriple)
+        XCTAssertEqual(events.map(\.type), [.leftMouseDown, .leftMouseUp, .leftMouseDown, .leftMouseUp])
+        XCTAssertEqual(events[0].getIntegerValueField(.mouseEventClickState), 1)
+        XCTAssertEqual(events[2].getIntegerValueField(.mouseEventClickState), 2)
+    }
 }

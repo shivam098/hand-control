@@ -41,10 +41,13 @@ final class Preview: NSView {
             NSColor.systemYellow.setFill()
             NSBezierPath(ovalIn: CGRect(origin: at(p), size: .zero).insetBy(dx: -6, dy: -6)).fill()
         }
-        guard let points = sample.points else { return }
+        guard let hand = sample.hand else { return }
+        let points = hand.points
+        let conf = hand.confidence
+        func shown(_ i: Int) -> Bool { points[i].x >= 0 && conf[i] >= 0.16 }
         let lines = NSBezierPath()
         for chain in [[0,1,2,3,4], [0,5,6,7,8], [5,9,13,17,0], [9,10,11,12], [13,14,15,16], [17,18,19,20]] {
-            for (a,b) in zip(chain, chain.dropFirst()) where points[a].x >= 0 && points[b].x >= 0 {
+            for (a,b) in zip(chain, chain.dropFirst()) where shown(a) && shown(b) {
                 lines.move(to: at(points[a]))
                 lines.line(to: at(points[b]))
             }
@@ -52,7 +55,7 @@ final class Preview: NSView {
         NSColor.systemMint.setStroke()
         lines.lineWidth = 2.5
         lines.stroke()
-        for (i,p) in points.enumerated() where p.x >= 0 {
+        for (i,p) in points.enumerated() where shown(i) {
             let tip = [4,8,12].contains(i)
             (tip ? NSColor.systemYellow : NSColor.white).setFill()
             let r: CGFloat = tip ? 4.5 : 2.5
